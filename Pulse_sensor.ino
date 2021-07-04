@@ -73,6 +73,7 @@ void loop() {
       }
     } else if(PulseRead<=ThresholdBPM){
       digitalWrite(LED16, HIGH);
+      delay(100);
       sawBeatBegin = false;
     }
     
