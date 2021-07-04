@@ -77,6 +77,8 @@ void loop() {
 
   int PulseRead = analogRead(PulseSensorPin);
 
+  
+
   setThreshold(PulseRead);
   
   bool sawBeatBegin = false;
@@ -105,39 +107,39 @@ void loop() {
       bpm_avg = (bpm_avg+bpm)/2;
       bpm_start_time = millis();
       count = 0;
+      sendToThingSpeak(bpm);
     }
 
-    if(millis()-last_update_thingspeak > 40000){
-      Serial.println("Uploading data to thingspeak");
-      ThingSpeak.setField(1, bpm);
-      ThingSpeak.setField(2, bpm_avg);
-      String bpm_status;
-      if(bpm<30){
-        bpm_status = String("offline");
-        Serial.println("Going to sleep for 300 seconds");
-        ESP.deepSleep(300e6);
-      }
-      else{
-        bpm_status = String("online");
-      }
-      ThingSpeak.setStatus(bpm_status);
-
-      // write to the ThingSpeak channel
-      int x = ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
-      if(x == 200){
-        Serial.println("Channel update successful.");
-      }
-      else{
-        Serial.println("Problem updating channel. HTTP error code " + String(x));
-      }
-      last_update_thingspeak = millis();
-
-    }  
   }
+}
 
-  
+void sendToThingSpeak(int bpm){
+  if(millis()-last_update_thingspeak > 30000){
+    Serial.println("Uploading data to thingspeak");
+    ThingSpeak.setField(1, bpm);
+    ThingSpeak.setField(2, bpm_avg);
+    String bpm_status;
+    if(bpm<30){
+      bpm_status = String("offline");
+      Serial.println("Going to sleep for 300 seconds");
+      ESP.deepSleep(300e6);
+    }
+    else{
+      bpm_status = String("online");
+    }
+    ThingSpeak.setStatus(bpm_status);
 
+    // write to the ThingSpeak channel
+    int x = ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
+    if(x == 200){
+      Serial.println("Channel update successful.");
+    }
+    else{
+      Serial.println("Problem updating channel. HTTP error code " + String(x));
+    }
+    last_update_thingspeak = millis();
 
+  }  
 }
 
 void setThreshold(int Signal){
