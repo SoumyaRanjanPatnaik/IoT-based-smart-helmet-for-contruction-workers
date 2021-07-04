@@ -22,13 +22,13 @@ WiFiClient client;
 
 //  Variables
 int PulseSensorPin = 0;        // Pulse Sensor PURPLE WIRE connected to ANALOG PIN 0
-int LED16 = 16;   //  The on-board Arduion LED
+int LED16 = 16;               //  The on-board Arduion LED
 
-int Threshold = 550;            // Determine which Signal to "count as a beat", and which to ingore.
+int ThresholdBPM = 550;       // Determine which Signal to "count_bpm as a beat", and which to ingore.
 int bpm_avg = 75;
 
-float pulse_max = Threshold; 
-float pulse_min = Threshold;
+float pulse_max = ThresholdBPM; 
+float pulse_min = ThresholdBPM;
 unsigned long last_update_threshold = 0;
 unsigned long last_update_thingspeak = millis();
 
@@ -36,7 +36,7 @@ unsigned long last_update_thingspeak = millis();
 // The SetUp Function:
 void setup() {
   pinMode(LED16,OUTPUT);         // pin that will blink to your heartbeat!
-  Serial.begin(9600);            // Set's up Serial Communication at certain speed.
+  Serial.begin(9600);            // Set's up Serial Communication at certain speed. (9600baud)
 
   Serial.println("Connecting to ");
   Serial.println(ssid); 
@@ -44,27 +44,57 @@ void setup() {
   ThingSpeak.begin(client);
 }
 
-void connect(){
-    if(WiFi.status() != WL_CONNECTED){
-    while (WiFi.status() != WL_CONNECTED) 
-    {
-      WiFi.begin(ssid, pwd); 
-      delay(500);
-      Serial.print(".");
-    }
-    Serial.println("");
-    Serial.println("WiFi connected"); 
-  }
-}
 
 // The Main Loop Function
 void loop() {
-  // Read the PulseSensor's value.
 
-  int count = 0;
+  int count_bpm = 0;  //track
   int bpm=0;
   unsigned long bpm_start_time = millis();
 
+  connect_wifi();
+
+  int PulseRead = analogRead(PulseSensorPin);
+
+  setThresholdBPM(PulseRead);
+  
+  bool sawBeatBegin = false;
+  while(true){
+    PulseRead = analogRead(PulseSensorPin);
+    setThresholdBPM(PulseRead);
+
+    if(PulseRead>ThresholdBPM  && pulse_max - pulse_min>11){
+      digitalWrite(LED16, LOW);
+      if(sawBeatBegin==false){
+        count_bpm++;
+        Serial.print("Beats: ");
+        Serial.println(count_bpm);
+        sawBeatBegin = true;
+      }
+    } else if(PulseRead<=ThresholdBPM){
+      digitalWrite(LED16, HIGH);
+      sawBeatBegin = false;
+    }
+    
+    
+    if(millis()-bpm_start_time > 30000){
+      Serial.print("The average pulse rate in the past 30 sec is: ");
+      bpm = count_bpm*2;
+      Serial.println(bpm);
+      bpm_avg = (bpm_avg+bpm)/2;
+      bpm_start_time = millis();
+      count_bpm = 0;
+      break;
+    }
+
+  }
+  sendToThingSpeak(bpm);
+}
+
+/*
+Code for connecting to WiFi Network.
+*/
+void connect_wifi(){
   if(WiFi.status() != WL_CONNECTED){
     Serial.print("Attempting to connect to SSID: ");
     Serial.println(ssid);
@@ -74,45 +104,11 @@ void loop() {
       delay (10000);
     } 
   }
-
-  int PulseRead = analogRead(PulseSensorPin);
-
-  
-
-  setThreshold(PulseRead);
-  
-  bool sawBeatBegin = false;
-  while(true){
-    PulseRead = analogRead(PulseSensorPin);
-    setThreshold(PulseRead);
-
-    if(PulseRead>Threshold  && pulse_max - pulse_min>11){
-      digitalWrite(LED16, LOW);
-      if(sawBeatBegin==false){
-        count++;
-        Serial.print("Beats: ");
-        Serial.println(count);
-        sawBeatBegin = true;
-      }
-    } else if(PulseRead<=Threshold){
-      digitalWrite(LED16, HIGH);
-      sawBeatBegin = false;
-    }
-    
-    
-    if(millis()-bpm_start_time > 30000){
-      Serial.print("The average pulse rate in the past 30 sec is: ");
-      bpm = count*2;
-      Serial.println(bpm);
-      bpm_avg = (bpm_avg+bpm)/2;
-      bpm_start_time = millis();
-      count = 0;
-      sendToThingSpeak(bpm);
-    }
-
-  }
 }
 
+/*
+Send Data to thingspeak.
+*/
 void sendToThingSpeak(int bpm){
   if(millis()-last_update_thingspeak > 30000){
     Serial.println("Uploading data to thingspeak");
@@ -142,7 +138,10 @@ void sendToThingSpeak(int bpm){
   }  
 }
 
-void setThreshold(int Signal){
+/*
+Set Threshold for calculating BPM. 
+*/
+void setThresholdBPM(int Signal){
 
   if(Signal > pulse_max){
     pulse_max = Signal;   
@@ -152,9 +151,9 @@ void setThreshold(int Signal){
   }
 
   if(millis()-last_update_threshold>1000){
-    Threshold = (4*pulse_min/9)+(5*pulse_max/9);
+    ThresholdBPM = (4*pulse_min/9)+(5*pulse_max/9);
     last_update_threshold = millis();
-    pulse_min = Threshold;
-    pulse_max = Threshold;
+    pulse_min = ThresholdBPM;
+    pulse_max = ThresholdBPM;
   }
 }
