@@ -12,8 +12,8 @@
 #include <ESP8266WiFi.h>
 #include "wifi_config.h"
 #include <ThingSpeak.h>
-#include <Adafruit_MPU6050.h> 
-#include <Adafruit_BMP280.h>
+#include "Adafruit_MPU6050.h"
+#include "Adafruit_BMP280.h"
 #include <Adafruit_Sensor.h>
 #include <Wire.h>
 #include <math.h>
