@@ -1,6 +1,3 @@
-
-
-
 /*
 1) This shows a live human Heartbeat Pulse.
 2) Live visualization in Arduino's Cool "Serial Plotter".
@@ -10,6 +7,7 @@
 
 */
 #include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
 #include "wifi_config.h"
 #include <ThingSpeak.h>
 #include "Adafruit_MPU6050.h"
@@ -18,6 +16,7 @@
 #include <Wire.h>
 #include <math.h>
 
+
 Adafruit_MPU6050 mpu;
 Adafruit_BMP280 bmp;
 
@@ -25,18 +24,21 @@ sensors_event_t a, g, temp;
 
 const char *ssid = WIFI_SSID;
 const char *pwd = WIFI_PWD;
+String localServerName = "http://192.168.0.100:8080/ajax";
 
 unsigned long myChannelNumber = CH_ID;
 const char *myWriteAPIKey = API_KEY;
 
 WiFiClient client;
+HTTPClient http_client;
 
 //  Variables
 int PulseSensorPin = 0; // Pulse Sensor PURPLE WIRE connected to ANALOG PIN 0
-int LED16 = 16;         //  The on-board Arduion LED
+int LED16 = 2;         //  The on-board Arduion LED
 
 int ThresholdBPM = 550; // Determine which Signal to "count_bpm as a beat", and which to ingore.
 int bpm_avg = 75;
+int bpm_curr = 0;
 
 float pulse_max = ThresholdBPM;
 float pulse_min = ThresholdBPM;
@@ -48,6 +50,7 @@ float base_height;
 float curr_height;
 
 bool fall_detected = true;
+String address = "\"0\"";
 
 // The SetUp Function:
 void setup()
@@ -86,6 +89,8 @@ void setup()
   Serial.print("Altitude above sea level: ");
   Serial.println(base_height);
 
+  Serial.print("Connecting to server: ");
+
   setMPUProperties(mpu);
   ThingSpeak.begin(client);
 }
@@ -93,17 +98,17 @@ void setup()
 // The Main Loop Function
 void loop()
 {
-
   int count_bpm = 0; //track
   int bpm = 0;
   unsigned long bpm_start_time = millis(); //Time at which the bpm measurement started
   unsigned long beat_begin_time;           //Time at which the last beat started
-
+  
   connect_wifi();
 
   int PulseRead = analogRead(PulseSensorPin);
 
-  setThresholdBPM(PulseRead);
+  // setThresholdBPM(PulseRead);
+  ThresholdBPM = 150;
 
   bool sawBeatBegin = false;
   while (true)
@@ -116,7 +121,7 @@ void loop()
     mpu.getEvent(&a, &g, &temp);
 
     handleAcceleration();
-    if (PulseRead > ThresholdBPM && pulse_max - pulse_min > 13 && millis()-beat_begin_time > 320)
+    if (PulseRead > ThresholdBPM && pulse_max - pulse_min > 13 && millis()-beat_begin_time > 310)
     {
       digitalWrite(LED16, LOW);
       if (sawBeatBegin == false)
@@ -139,6 +144,7 @@ void loop()
     {
       Serial.print("The average pulse rate in the past 30 sec is: ");
       bpm = count_bpm;
+      bpm_curr = bpm;
       Serial.println(bpm);
       bpm_avg = (bpm_avg + bpm) / 2;
       bpm_start_time = millis();
@@ -150,19 +156,12 @@ void loop()
 }
 
 void handleAcceleration(){
+  mpu.getEvent(&a, &g, &temp);
+  float acc_x = a.acceleration.x; 
+  float acc_y = a.acceleration.y;
+  float acc_z = a.acceleration.z;
+  float netAcc = abs(sqrt(acc_x*acc_x + acc_y*acc_y + acc_z*acc_z)-9.8);
 
-  // Serial.print("Acceleration X: ");
-  // Serial.print(-1*a.acceleration.x + 9.75);
-  // Serial.print(", Y: ");
-  // Serial.print(a.acceleration.y+1,05);
-  // Serial.print(", Z: ");
-  // Serial.print(a.acceleration.z+0.7);
-  // Serial.println(" m/s^2");
-
-  float acc_x = -1*a.acceleration.x + 9.75;
-  float acc_y = a.acceleration.y+1.05;
-  float acc_z = a.acceleration.z+0.7;
-  float netAcc = sqrt(acc_x*acc_x + acc_y*acc_y + acc_z*acc_z);
   unsigned long fall_start = 0;;
   bool fallStarted = false;
   unsigned int fall_duration = 0;
@@ -173,10 +172,10 @@ void handleAcceleration(){
       fallStarted = true;
     }
     mpu.getEvent(&a, &g, &temp);
-    acc_x = -1*a.acceleration.x + 9.75;
-    acc_y = a.acceleration.y+1.05;
-    acc_z = a.acceleration.z+0.7;
-    netAcc = sqrt(acc_x*acc_x + acc_y*acc_y + acc_z*acc_z);
+    acc_x = a.acceleration.x;
+    acc_y = a.acceleration.y;
+    acc_z = a.acceleration.z;
+    netAcc = abs(sqrt(acc_x*acc_x + acc_y*acc_y + acc_z*acc_z)-9.8);
     delay(5);
   }
   if(fallStarted==true){
@@ -191,20 +190,20 @@ void handleAcceleration(){
       return;
     }
     float expected_duration = sqrt(2*(height_above_base)/10)*1000;
-    if(curr_height-base_height < 5 || fall_duration < expected_duration){
+    Serial.print( "Calculated (using altitude) duration of fall: ");
+    Serial.println(expected_duration);
+    if(curr_height-base_height < 5 || fall_duration < 3*expected_duration/4){
+      send_json("false");
       Serial.println("Height and/or fall duration below threshold of 5 meters and 500ms respectively. Skipping...");
       return;
     }
-    Serial.print( "Calculated (using altitude) duration of fall: ");
-    Serial.println(expected_duration);
-    if(fall_duration >= 3*expected_duration/4 ){
+    else{
+      send_json(String("true"));
       Serial.print("Fall duration exceeded threshold duration.");
       Serial.println("ms");
       sendFallToThingspeak(fall_duration);
-    }
-    else{
-      Serial.println("Fall durationn did not exceed threshold. Skipping alert...");
-    }
+    
+    }    
   }
 }
 
@@ -308,7 +307,7 @@ void setThresholdBPM(int Signal)
 
   if (millis() - last_update_threshold > 1000)
   {
-    ThresholdBPM = (pulse_min / 3) + (2 * pulse_max / 3);
+    ThresholdBPM = (pulse_min / 2) + (1 * pulse_max / 2);
     last_update_threshold = millis();
     pulse_min = ThresholdBPM;
     pulse_max = ThresholdBPM;
@@ -375,4 +374,40 @@ void setMPUProperties(Adafruit_MPU6050 &mpu){
       Serial.println("5 Hz");
       break;
     }
+}
+
+void send_json(String fall_occurred){
+
+    http_client.begin(client, localServerName);
+    Serial.println("");
+
+    Serial.println("Sending data to 192.168.0.9/ajax");
+    http_client.addHeader("Content-Type", "application/json");
+    
+    // String post_json = String("{\"fall_detected\":")+fall_occurred+String(", \"pulse\": {\"curr\":")+String(bpm_curr)+String(", \"avg\": ")+String(bpm_avg)+String("}, \"height\":")+String(curr_height-base_height)+String("}");
+    String post_json = prepare_url(fall_occurred);
+    
+    int httpResponseCode = http_client.POST(post_json);
+    Serial.printf("[HTTP] Response Code: %d\n", httpResponseCode);
+    http_client.end();
+}
+
+
+String prepare_url(String fall)
+{
+  
+  String comma = ",";
+  String url = "";
+  url+="{";
+    url+="\"addr\":"+address+comma;
+    url+="\"data\": {";
+      url+="\"fall_detected\":"+fall+comma;
+      url+="\"pulse\": {";
+          url+="\"avg\":" + bpm_avg + comma;
+          url+="\"curr\":"+bpm_curr+comma;
+      url+="},";
+      url+="\"height\":"+(int)(curr_height-base_height)+comma;
+    url+="}";
+  url+="}";
+  return url;
 }
